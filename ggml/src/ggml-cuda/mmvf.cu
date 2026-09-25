@@ -838,6 +838,9 @@ bool ggml_cuda_should_use_mmvf(enum ggml_type type, int cc, const int64_t * src0
                 return ne11 <= 8;
             } else if (GGML_CUDA_CC_IS_AMD(cc)) {
                 if (fp16_mma_hardware_available(cc)) {
+                    if (GGML_CUDA_CC_IS_RDNA3_5(cc)) {
+                        return ne11 <= 8; // gfx1151: hipBLAS 128x128 tiles are ~25x slower on thin F16 weights at 4-8 columns (MTP verify)
+                    }
                     if (GGML_CUDA_CC_IS_RDNA3(cc)) {
                         return ne11 <= 3;
                     }
