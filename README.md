@@ -58,6 +58,16 @@ and a C/C++ compiler; the GPU libraries it needs (libdrm, libelf, libnuma) come 
 
 ## Run
 
+Get the model and the draft sidecar (anonymous; `hf` comes with `pip install -U huggingface_hub`):
+
+```bash
+hf download PaoAI/Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2-GGUF Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2.1.gguf --local-dir .
+hf download unsloth/Qwen3.8-Flash-Next-GGUF MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf --local-dir .
+mv MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf .    # hf keeps the repo's MTP/ folder; the command below expects the file here
+```
+
+Then, from the same folder:
+
 ```bash
 source ~/.local/share/paoai-qwen38fn/env.sh     # written by the build: library path + the 4 runtime switches
 llama-server -m Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2.1.gguf \
@@ -71,7 +81,8 @@ llama-server -m Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2.1.gguf \
 The four switches in `env.sh`: `HSA_OVERRIDE_GFX_VERSION=11.5.1` (report the GPU as gfx1151), `GGML_HIP_ENABLE_UNIFIED_MEMORY=1`
 (let the GPU use system memory), `ENABLE_RETAINED_PM4=1` + `DEBUG_HIP_GRAPH_PM4=1` (pwilkin's retained-PM4 graph path — they
 need his runtime build). The draft sidecar is `MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf` from
-[unsloth/Qwen3.8-Flash-Next-GGUF](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF). Keep the model file on a fast NVMe
+[unsloth/Qwen3.8-Flash-Next-GGUF](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF). File checksums (sha256) are on the
+[model card](https://huggingface.co/PaoAI/Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2-GGUF). Keep the model file on a fast NVMe
 drive that is not nearly full: `--lazy-mode on-direct` reads its per-layer-embedding table from the file while writing.
 
 ## Scope and support
