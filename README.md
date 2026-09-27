@@ -1,126 +1,96 @@
-# llama.cpp
+# paoai-qwen38fn-rocm-engine
 
-![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)
+**The engine behind the [Qwen3.8-Flash-Next PaoAI STRIX BALANCED-2.1](https://huggingface.co/PaoAI/Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2-GGUF) numbers on AMD Strix Halo (Ryzen AI Max+ 395 / gfx1151), ROCm/HIP.**
 
-<div align="center">
+This is [pwilkin's llama.cpp `strix-halo` branch](https://github.com/pwilkin/llama.cpp/tree/strix-halo) at commit
+`b0f31f5876ef3856b55f5bb88072cc96e5effafe`, **plus one PaoAI fix** — nothing else. It is a tested snapshot for one model
+(Qwen3.8-Flash-Next), not a general-purpose llama.cpp distribution. All credit for the engine itself goes to pwilkin and the
+llama.cpp authors; the full history is kept so every commit shows its real author.
 
-<b>LLM inference in C/C++</b>
+| | |
+|---|---|
+| Base | `pwilkin/llama.cpp` branch `strix-halo` @ `b0f31f5876ef3856b55f5bb88072cc96e5effafe` (Piotr Wilkin, MIT) |
+| PaoAI fix | `b8fe9e80d5b33a30415d6756a694029bc8c28738` — 1 file, 3 lines (below) |
+| Runtime it needs | [`pwilkin/rocm-systems`](https://github.com/pwilkin/rocm-systems/tree/ilintar-experiments) branch `ilintar-experiments` @ `7dda3ac6cfe6bbe0b7f08c23a67cfa118d8641a1` (ROCr + HIP with retained-PM4 graphs) |
+| ROCm SDK | [AMD TheRock](https://github.com/ROCm/TheRock) 10.0.0, gfx1151 tarball |
+| Model | [PaoAI/Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2-GGUF](https://huggingface.co/PaoAI/Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2-GGUF) + unsloth's MTP draft sidecar |
+| Measured speeds | on the model card (the only place we publish numbers) |
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/github/v/release/ggml-org/llama.cpp?filter=v*&color=brightgreen)](https://github.com/ggml-org/llama.cpp/releases?q=tag:v0)
-[![Nightly](https://img.shields.io/github/v/release/ggml-org/llama.cpp?label=nightly&filter=b*&color=orange)](https://github.com/ggml-org/llama.cpp/releases?q=b)
-[![Server](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/server.yml?label=Server)](https://github.com/ggml-org/llama.cpp/actions/workflows/server.yml)
-[![Docker](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/docker.yml?label=Docker)](https://github.com/ggml-org/llama.cpp/actions/workflows/docker.yml)
-[![Winget](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/winget.yml?label=Winget)](https://github.com/ggml-org/llama.cpp/actions/workflows/winget.yml)
+The original llama.cpp README is kept unchanged as [README-llama.cpp.md](README-llama.cpp.md).
 
-[ggml](https://github.com/ggml-org/ggml) / [ops](https://github.com/ggml-org/llama.cpp/blob/master/docs/ops.md) / [maintainer PRs](https://github.com/ggml-org/llama.cpp/issues?q=is%3Apr%20is%3Aopen%20draft%3AFalse%20(author%3Argerganov%20OR%20author%3AKitaitiMakoto%20OR%20author%3Adanbev%20OR%20author%3Aaldehir%20OR%20author%3Amax-krasnyansky%20OR%20author%3ACISC%20OR%20author%3Aggerganov%20OR%20author%3Aam17an%20OR%20author%3Ajhen0409%20OR%20author%3Abartowski1182%20OR%20author%3Anikwen%20OR%20author%3Ahipudding%20OR%20author%3Aravi9%20OR%20author%3AServeurpersoCom%20OR%20author%3Apwilkin%20OR%20author%3Areeselevine%20OR%20author%3Angxson%20OR%20author%3Ajeffbolznv%20OR%20author%3Amarty1885%20OR%20author%3A0cc4m%20OR%20author%3ATitaniumtown%20OR%20author%3Aangt%20OR%20author%3AIMbackK%20OR%20author%3Aarthw%20OR%20author%3AJohannesGaessler%20OR%20author%3AORippler%20OR%20author%3Aruixiang63%20OR%20author%3Axctan%20OR%20author%3Aallozaur%20OR%20author%3Ayomaytk%20OR%20author%3Aaendk%20OR%20author%3Awine99%20OR%20author%3Agaugarg-nv%20OR%20author%3Ataronaeo%20OR%20author%3Aforforever73%20OR%20author%3Alhez%20OR%20author%3Anetrunnereve%20OR%20author%3Afairydreaming)%20sort%3Aupdated-desc) / [dev stats](https://github.com/ggml-org/llama.cpp-dev) / [lib llama API](https://github.com/ggml-org/llama.cpp/issues/9289) / [llama-server REST API](https://github.com/ggml-org/llama.cpp/issues/9291)
+## The PaoAI fix, in plain words
 
-</div>
+When the model writes, the MTP draft head guesses the next 4 tokens and the model checks all of them in one pass. On Strix Halo
+(RDNA3.5), that check multiplied thin F16 weights by 4–8 columns — and at 4+ columns the engine handed the work to a hipBLAS
+routine built for big matrices (128×128 tiles), which is slow for this shape. The fix lets the fast matrix-vector kernel keep the
+job up to 8 columns on RDNA3.5:
 
-## Quick start
-
-A few options to get `llama.cpp` installed on your machine:
-
-- Visit https://llama.app and follow the instructions
-- Run with Docker - see our [Docker documentation](docs/docker.md)
-- Download pre-built binaries from the [releases page](https://github.com/ggml-org/llama.cpp/releases)
-- Build from source by cloning this repository - check out [our build guide](docs/build.md)
-
-Once installed:
-
-```sh
-# Download and run a model directly from Hugging Face
-llama cli -hf ggml-org/Qwen3.5-0.8B-GGUF
-
-# Launch OpenAI-compatible API server
-llama serve -hf ggml-org/Qwen3.5-0.8B-GGUF
+```c
+// ggml/src/ggml-cuda/mmvf.cu, ggml_cuda_should_use_mmvf()
+if (GGML_CUDA_CC_IS_RDNA3_5(cc)) {
+    return ne11 <= 8; // gfx1151: hipBLAS 128x128 tiles are ~25x slower on thin F16 weights at 4-8 columns (MTP verify)
+}
 ```
 
-<table align="center">
-    <tr>
-        <td align="center" width=50%>
-            <img width="1310" height="888" alt="VLM session with `llama cli`" src="https://github.com/user-attachments/assets/88726b48-1713-48aa-a525-95a02e78afc4" />
-            <i>VLM session with <b>llama cli</b></i>
-        </td>
-        <td align="center">
-            <img width="1392" height="958" alt="Built-in web UI against `llama serve` running Qwen 3.6" src="https://github.com/user-attachments/assets/b402f972-2e32-4def-8771-8d849f08cf2e" />
-            <i>Built-in web UI against <b>llama serve</b></i>
-        </td>
-    </tr>
-<table>
+Measured on Strix Halo: the 5-token check pass got **24–25 % faster** (8K and 32K context, 3 interleaved rounds each), 1–3 token
+passes unchanged; `test-backend-ops` MUL_MAT 1297/1297 and MUL_MAT_ID 913/913 passed. Only RDNA3.5 is affected; every other
+GPU takes the same path as before.
 
-## Description
+## Build (Linux, gfx1151, user space — no sudo)
 
-The main goal of `llama.cpp` is to enable LLM (and VLM) inference with minimal setup and state-of-the-art performance on
-a wide range of hardware - locally and in the cloud.
+```bash
+git clone https://github.com/guevae2/paoai-qwen38fn-rocm-engine
+cd paoai-qwen38fn-rocm-engine
+scripts/paoai/build-strix-halo.sh
+```
 
-- Plain C/C++ implementation without any dependencies
-- Apple silicon is a first-class citizen - optimized via ARM NEON, Accelerate and Metal frameworks
-- AVX, AVX2, AVX512 and AMX support for x86 architectures
-- RVV, ZVFH, ZFH, ZICBOP and ZIHINTPAUSE support for RISC-V architectures
-- 1.5-bit, 2-bit, 3-bit, 4-bit, 5-bit, 6-bit, and 8-bit integer quantization for faster inference and reduced memory use
-- Custom CUDA kernels for running LLMs on NVIDIA GPUs (support for AMD GPUs via HIP and Moore Threads GPUs via MUSA)
-- Vulkan and SYCL backend support
-- CPU+GPU hybrid inference to partially accelerate models larger than the total VRAM capacity
+[`scripts/paoai/build-strix-halo.sh`](scripts/paoai/build-strix-halo.sh) does the three builds the measured engine used:
 
-The `llama.cpp` project is build on top of the [ggml](https://github.com/ggml-org/ggml) library.
+1. **ROCm SDK** — downloads the TheRock 10.0.0 gfx1151 tarball
+   (`https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx1151-10.0.0.tar.gz`, 1.79 GB) and checks its sha256
+   `4feabd9f2da72352df37f6d714a54847d3fe913c0341fbe2a6542c1164024baf`. Already have it? `ROCM_TARBALL=/path/to/it`.
+2. **Runtime** — clones pwilkin's `rocm-systems`, pins it to `7dda3ac6cf…`, builds ROCr and HIP (clr) into a private prefix.
+3. **Engine** — builds this repository with the HIP backend for gfx1151 (`GGML_HIP=ON`, `GPU_TARGETS=gfx1151`,
+   `GGML_HIP_GRAPHS=ON`, `GGML_HIP_NO_VMM=ON`, `GGML_CUDA_FA=ON`, …) and checks that it links against that private HIP + ROCr.
 
-## Supported backends
+Everything goes to `~/.local/share/paoai-qwen38fn` (`WORK=<dir>` to change it). You need `git cmake ninja python3 curl tar`
+and a C/C++ compiler; the GPU libraries it needs (libdrm, libelf, libnuma) come from the TheRock tarball.
 
-| Backend | Target devices |
-| --- | --- |
-| [BLAS](docs/build.md#blas-build) | All |
-| [BLIS](docs/backend/BLIS.md) | All |
-| [CANN](docs/build.md#cann) | Ascend NPU |
-| [CUDA](docs/build.md#cuda) | Nvidia GPU |
-| [HIP](docs/build.md#hip) | AMD GPU |
-| [Hexagon](docs/backend/snapdragon/README.md) | Snapdragon |
-| [IBM zDNN](docs/backend/zDNN.md) | IBM Z & LinuxONE |
-| [MUSA](docs/build.md#musa) | Moore Threads GPU |
-| [Metal](docs/build.md#metal-build) | Apple Silicon |
-| [OpenCL](docs/backend/OPENCL.md) | Adreno GPU |
-| [OpenVINO [In Progress]](docs/backend/OPENVINO.md) | Intel CPUs, GPUs, and NPUs |
-| [RPC](https://github.com/ggml-org/llama.cpp/tree/master/tools/rpc) | All |
-| [SYCL](docs/backend/SYCL.md) | Intel GPU |
-| [VirtGPU](docs/backend/VirtGPU.md) | VirtGPU APIR |
-| [Vulkan](docs/build.md#vulkan) | GPU |
-| [WebGPU](docs/build.md#webgpu) | All |
-| [ZenDNN](docs/build.md#zendnn) | AMD CPU |
+## Run
 
-## Documentation
+```bash
+source ~/.local/share/paoai-qwen38fn/env.sh     # written by the build: library path + the 4 runtime switches
+llama-server -m Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2.1.gguf \
+  -dev ROCm0 -ngl 999 -fa on -fit off --load-mode none --lazy-mode on-direct \
+  -ctk f16 -ctv f16 -c 262144 -b 16384 -ub 16384 --parallel 1 --jinja \
+  --spec-type draft-mtp --spec-draft-model mtp-Qwen3.8-Flash-Next-Q8_0.gguf \
+  --spec-draft-device ROCm0 --spec-draft-ngl 99 --spec-draft-n-max 4 \
+  --host 0.0.0.0 --port 8080
+```
 
-#### Tools
+The four switches in `env.sh`: `HSA_OVERRIDE_GFX_VERSION=11.5.1` (report the GPU as gfx1151), `GGML_HIP_ENABLE_UNIFIED_MEMORY=1`
+(let the GPU use system memory), `ENABLE_RETAINED_PM4=1` + `DEBUG_HIP_GRAPH_PM4=1` (pwilkin's retained-PM4 graph path — they
+need his runtime build). The draft sidecar is `MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf` from
+[unsloth/Qwen3.8-Flash-Next-GGUF](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF). Keep the model file on a fast NVMe
+drive that is not nearly full: `--lazy-mode on-direct` reads its per-layer-embedding table from the file while writing.
 
-- [cli](tools/cli/README.md)
-- [completion](tools/completion/README.md)
-- [server](tools/server/README.md)
-- [GBNF grammars](grammars/README.md)
+## Scope and support
 
-#### Development
+- **One model:** tested with Qwen3.8-Flash-Next (`qwen4exp`) on Strix Halo only. Other models and GPUs: use upstream llama.cpp
+  or pwilkin's branch.
+- **Frozen on purpose:** this branch stays at the tested commits so the model card's numbers stay reproducible. Newer pwilkin
+  commits are not merged automatically.
+- Issues about the PaoAI fix or the build script are welcome here; engine issues belong upstream.
 
-- [How to build](docs/build.md)
-- [Running on Docker](docs/docker.md)
-- [Build on Android](docs/android.md)
-- [Multi-GPU usage](docs/multi-gpu.md)
-- [Performance troubleshooting](docs/development/token_generation_performance_tips.md)
-- [GGML tips & tricks](https://github.com/ggml-org/llama.cpp/wiki/GGML-Tips-&-Tricks)
-- [XCFramework](docs/xcframework.md)
-- [Completions](docs/completions.md)
-- [Models](docs/models.md)
-- [Release process](docs/release.md)
+## Credits & license
 
-## Contributing
+- **[pwilkin (Piotr Wilkin)](https://github.com/pwilkin/llama.cpp/tree/strix-halo)** — the Strix Halo llama.cpp branch this is,
+  and the [ROCm runtime](https://github.com/pwilkin/rocm-systems/tree/ilintar-experiments) it runs on; the build steps follow
+  his [strix-halo installer](https://github.com/pwilkin/strix-halo)
+- **[ggml-org / llama.cpp](https://github.com/ggml-org/llama.cpp)** authors
+- **[AMD ROCm TheRock](https://github.com/ROCm/TheRock)** — the ROCm 10 SDK
+- **[Unsloth](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF)** — the MTP draft sidecar
+- **[Halogen](https://github.com/peonist-ai/halogen-flash-server)** — the 8-bit dense-weights idea behind BALANCED-2.1
+- **[PaoAI](https://huggingface.co/PaoAI)** — the RDNA3.5 fix, the build script, the model and its measurements
 
-- Contributors can open PRs
-- Collaborators will be invited based on contributions
-- Maintainers can push to branches in the `llama.cpp` repo and merge PRs into the `master` branch
-- Any help with managing issues, PRs and projects is very appreciated!
-- Read the [CONTRIBUTING.md](CONTRIBUTING.md) for more information
-
-## Acknowledgements
-
-- [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) - Single-header HTTP server, used by `llama-server` - MIT license
-- [nothings/stb](https://github.com/nothings/stb) - Single-header image format decoder, used by multimodal subsystem - Public domain
-- [nlohmann/json](https://github.com/nlohmann/json) - Single-header JSON library, used by various tools/examples - MIT License
-- [mackron/miniaudio](https://github.com/mackron/miniaudio) - Single-header audio format decoder, used by multimodal subsystem - Public domain
-- [sheredom/subprocess.h](https://github.com/sheredom/subprocess.h) - Single-header process launching solution for C and C++ - Public domain
+MIT License — see [LICENSE](LICENSE) (unchanged from llama.cpp). Not affiliated with AMD, ggml-org or the Qwen team.
