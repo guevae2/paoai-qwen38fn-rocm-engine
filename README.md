@@ -36,12 +36,38 @@ Measured on Strix Halo: the 5-token check pass got **24–25 % faster** (8K and 
 passes unchanged; `test-backend-ops` MUL_MAT 1297/1297 and MUL_MAT_ID 913/913 passed. Only RDNA3.5 is affected; every other
 GPU takes the same path as before.
 
-## Build (Linux, gfx1151, user space — no sudo)
+## Build (Linux, gfx1151 — the build itself runs in user space; only the one-time tool install uses sudo)
+
+Once, install the tools (the package lists are the ones pwilkin's own installer uses for these same build steps).
+
+Fedora:
+
+```bash
+sudo dnf install -y ca-certificates cmake curl elfutils-libelf-devel gcc gcc-c++ git libcurl-devel libdrm-devel \
+  libglvnd-devel libstdc++-devel libzstd-devel make ninja-build numactl-devel openssl-devel pciutils \
+  pkgconf-pkg-config python3 python3-pip python3-devel tar vim-common zlib-devel
+```
+
+Ubuntu / Debian:
+
+```bash
+sudo apt update && sudo apt install -y build-essential ca-certificates cmake curl git libcurl4-openssl-dev \
+  libdrm-dev libdw-dev libelf-dev libgl-dev libnuma-dev libpciaccess-dev libssl-dev libudev-dev libzstd-dev \
+  ninja-build pciutils pkg-config python3 python3-pip python3-venv xxd zlib1g-dev
+```
+
+Then, on both:
+
+```bash
+curl -LsSf https://hf.co/cli/install.sh | bash     # the hf download tool
+export PATH="$HOME/.local/bin:$PATH"               # so this terminal finds hf (new terminals do it by themselves)
+```
+
+Then build:
 
 ```bash
 git clone https://github.com/guevae2/paoai-qwen38fn-rocm-engine
-cd paoai-qwen38fn-rocm-engine
-scripts/paoai/build-strix-halo.sh
+cd paoai-qwen38fn-rocm-engine && scripts/paoai/build-strix-halo.sh && cd ..
 ```
 
 [`scripts/paoai/build-strix-halo.sh`](scripts/paoai/build-strix-halo.sh) does the three builds the measured engine used:
@@ -53,12 +79,13 @@ scripts/paoai/build-strix-halo.sh
 3. **Engine** — builds this repository with the HIP backend for gfx1151 (`GGML_HIP=ON`, `GPU_TARGETS=gfx1151`,
    `GGML_HIP_GRAPHS=ON`, `GGML_HIP_NO_VMM=ON`, `GGML_CUDA_FA=ON`, …) and checks that it links against that private HIP + ROCr.
 
-Everything goes to `~/.local/share/paoai-qwen38fn` (`WORK=<dir>` to change it). You need `git cmake ninja python3 curl tar`
-and a C/C++ compiler; the GPU libraries it needs (libdrm, libelf, libnuma) come from the TheRock tarball.
+Everything goes to `~/.local/share/paoai-qwen38fn` (`WORK=<dir>` to change it). The step-1 packages are what a fresh system
+is missing: compilers, `cmake`/`ninja`, and development headers the HIP runtime build looks for (a clean Fedora without
+`libglvnd-devel` stops with `Could NOT find OpenGL`). libdrm, libelf and libnuma themselves come from the TheRock tarball.
 
 ## Run
 
-Get the model and the draft sidecar (anonymous; `hf` comes with `pip install -U huggingface_hub`):
+Get the model and the draft sidecar (anonymous, no login needed):
 
 ```bash
 hf download PaoAI/Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2-GGUF Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2.1.gguf --local-dir .
@@ -69,7 +96,7 @@ mv MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf .    # hf keeps the repo's MTP/ folder; 
 Then, from the same folder:
 
 ```bash
-source ~/.local/share/paoai-qwen38fn/env.sh     # written by the build: library path + the 4 runtime switches
+source ~/.local/share/paoai-qwen38fn/env.sh   # written by the engine build: library path + the 4 switches explained below
 llama-server -m Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2.1.gguf \
   -dev ROCm0 -ngl 999 -fa on -fit off --load-mode none --lazy-mode on-direct \
   -ctk f16 -ctv f16 -c 262144 -b 16384 -ub 16384 --parallel 1 --jinja \
@@ -77,6 +104,11 @@ llama-server -m Qwen3.8-Flash-Next-PaoAI-STRIX-BALANCED-2.1.gguf \
   --spec-draft-device ROCm0 --spec-draft-ngl 99 --spec-draft-n-max 4 \
   --host 0.0.0.0 --port 8080
 ```
+
+After about a minute the log says `listening on http://0.0.0.0:8080`; open **http://localhost:8080** for the chat page, or point an
+OpenAI-compatible app at `http://localhost:8080/v1` (`--host 127.0.0.1` keeps it to this PC). Help for common problems (a missing
+package, `hf: command not found`, a download that stopped halfway, GPU permission) is in the model card's "If something goes wrong"
+table. These steps were run as printed on a clean Fedora 44 and Ubuntu 24.04 on 2026-09-27.
 
 The four switches in `env.sh`: `HSA_OVERRIDE_GFX_VERSION=11.5.1` (report the GPU as gfx1151), `GGML_HIP_ENABLE_UNIFIED_MEMORY=1`
 (let the GPU use system memory), `ENABLE_RETAINED_PM4=1` + `DEBUG_HIP_GRAPH_PM4=1` (pwilkin's retained-PM4 graph path — they
